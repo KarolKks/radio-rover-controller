@@ -1,0 +1,102 @@
+# ==========================================
+# STM32 & CMake Embedded Project .gitignore
+# ==========================================
+
+# --- Build Output & Artifacts ---
+build/
+build-*/
+cmake-build-*/
+bin/
+out/
+
+# Compiled object files & dependencies
+*.o
+*.obj
+*.d
+*.i
+*.s
+
+# Libraries & Archives
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# Embedded binaries & linker outputs
+*.elf
+*.bin
+*.hex
+*.srec
+*.map
+*.lst
+
+# --- CMake Generated Files ---
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Ninja build files
+.ninja_deps
+.ninja_log
+
+# --- IDE & Editor Specific Files ---
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# CLion / JetBrains
+.idea/
+*.iws
+*.iml
+
+# STM32CubeIDE / Eclipse / TrueSTUDIO
+.metadata/
+.settings/
+*.launch
+
+# Keil MDK / IAR Embedded Workbench
+*.uvopt
+*.uvoptx
+*.uvgui.*
+*.dep
+*.ewd
+*.ewp
+
+# --- Debug & Flash Tools ---
+*.log
+JLinkLog.txt
+.gdb_history
+
+# --- OS Generated Files ---
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux / Editor swap & backup files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
