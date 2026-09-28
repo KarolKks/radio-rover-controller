@@ -1,10 +1,6 @@
 #include "NRF24L01.h"
-#include "spi.h"
-#include "stm32l4xx_ll_bus.h"
-#include "stm32l4xx_ll_gpio.h"
-#include "stm32l4xx_ll_utils.h"
-#include <stdio.h>
 
+// NRF24L01+ SPI Commands
 #define NRF24_CMD_R_REGISTER            (0x00U)
 #define NRF24_CMD_W_REGISTER            (0x20U)
 #define NRF24_CMD_R_RX_PAYLOAD          (0x61U)
@@ -14,6 +10,7 @@
 #define NRF24_CMD_REUSE_TX_PL           (0xE3U)
 #define NRF24_CMD_NOP                   (0xFFU)
 
+// NRF24L01+ Register Map
 #define NRF24_REG_CONFIG                (0x00U)
 #define NRF24_REG_EN_AA                 (0x01U)
 #define NRF24_REG_EN_RXADDR             (0x02U)
@@ -31,6 +28,7 @@
 #define NRF24_REG_DYNPD                 (0x1CU)
 #define NRF24_REG_FEATURE               (0x1DU)
 
+// CONFIG Register Bit Masks
 #define NRF24_CONFIG_MASK_RX_DR         (1U << 6)
 #define NRF24_CONFIG_MASK_TX_DS         (1U << 5)
 #define NRF24_CONFIG_MASK_MAX_RT        (1U << 4)
@@ -39,16 +37,20 @@
 #define NRF24_CONFIG_PWR_UP             (1U << 1)
 #define NRF24_CONFIG_PRIM_RX            (1U << 0)
 
+// STATUS Register Bit Masks
 #define NRF24_STATUS_RX_DR              (1U << 6)
 #define NRF24_STATUS_TX_DS              (1U << 5)
 #define NRF24_STATUS_MAX_RT             (1U << 4)
 #define NRF24_STATUS_TX_FULL            (1U << 0)
 
+// Default Radio Configuration
 #define NRF24_DEFAULT_CHANNEL           (76U)
 #define NRF24_ADDR_WIDTH                (5U)
 
+// Default target rover radio address
 static const uint8_t s_default_addr[NRF24_ADDR_WIDTH] = { 'R', 'O', 'V', '0', '1' };
 
+// Control CSN (Chip Select Not) on PA10
 static inline void nrf24_csn_high(void)
 {
     LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_10);
@@ -59,6 +61,7 @@ static inline void nrf24_csn_low(void)
     LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_10);
 }
 
+// Control CE (Chip Enable) on PA9
 static inline void nrf24_ce_high(void)
 {
     LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_9);
@@ -69,6 +72,7 @@ static inline void nrf24_ce_low(void)
     LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_9);
 }
 
+// Read single 8-bit register
 static uint8_t nrf24_read_reg(uint8_t reg)
 {
     nrf24_csn_low();
@@ -78,6 +82,7 @@ static uint8_t nrf24_read_reg(uint8_t reg)
     return val;
 }
 
+// Write single 8-bit register
 static void nrf24_write_reg(uint8_t reg, uint8_t val)
 {
     nrf24_csn_low();
@@ -86,6 +91,7 @@ static void nrf24_write_reg(uint8_t reg, uint8_t val)
     nrf24_csn_high();
 }
 
+// Read multi-byte register buffer (e.g., addresses)
 static void nrf24_read_reg_buf(uint8_t reg, uint8_t *buf, uint8_t len)
 {
     nrf24_csn_low();
@@ -94,6 +100,7 @@ static void nrf24_read_reg_buf(uint8_t reg, uint8_t *buf, uint8_t len)
     nrf24_csn_high();
 }
 
+// Write multi-byte register buffer
 static void nrf24_write_reg_buf(uint8_t reg, const uint8_t *buf, uint8_t len)
 {
     nrf24_csn_low();
@@ -102,6 +109,7 @@ static void nrf24_write_reg_buf(uint8_t reg, const uint8_t *buf, uint8_t len)
     nrf24_csn_high();
 }
 
+// Send single command byte to NRF24
 static void nrf24_send_cmd(uint8_t cmd)
 {
     nrf24_csn_low();
@@ -139,7 +147,7 @@ nrf24_status_t nrf24_init(void)
         return NRF24_ERR_NOT_FOUND;
     }
 
-    // Wait for radio chip internal power-on reset
+    // Wait for radio internal power-on reset stabilization
     LL_mDelay(10);
 
     // Verify radio presence by writing and reading back address width register
@@ -185,6 +193,7 @@ nrf24_status_t nrf24_init(void)
 
 bool nrf24_is_connected(void)
 {
+    // Test SPI communication via setup address width register
     nrf24_write_reg(NRF24_REG_SETUP_AW, 0x03U);
     return (nrf24_read_reg(NRF24_REG_SETUP_AW) == 0x03U);
 }
@@ -202,6 +211,7 @@ void nrf24_set_tx_address(const uint8_t *addr)
 
 void nrf24_set_channel(uint8_t channel)
 {
+    // Clamp channel to maximum valid value (0 - 125)
     if (channel > 125U) {
         channel = 125U;
     }
@@ -212,6 +222,7 @@ void nrf24_set_pa_level(nrf24_pa_level_t level)
 {
     uint8_t setup = nrf24_read_reg(NRF24_REG_RF_SETUP) & 0xF9U;
 
+    // Configure RF power output bits
     switch (level) {
         case NRF24_PA_MIN:
             setup |= (0x00U << 1);
@@ -235,6 +246,7 @@ void nrf24_set_data_rate(nrf24_data_rate_t rate)
 {
     uint8_t setup = nrf24_read_reg(NRF24_REG_RF_SETUP) & ~((1U << 5) | (1U << 3));
 
+    // Configure data rate bits (RF_DR_LOW, RF_DR_HIGH)
     switch (rate) {
         case NRF24_RATE_250KBPS:
             setup |= (1U << 5);
@@ -256,6 +268,7 @@ nrf24_status_t nrf24_send_packet(const rover_packet_t *packet)
         return NRF24_ERR_PARAM;
     }
 
+    // Transmit telemetry struct as raw payload buffer
     return nrf24_send_raw((const uint8_t *)packet, sizeof(rover_packet_t));
 }
 
@@ -297,11 +310,13 @@ nrf24_status_t nrf24_send_raw(const uint8_t *data, uint8_t length)
     // Clear interrupt flags in radio
     nrf24_write_reg(NRF24_REG_STATUS, NRF24_STATUS_TX_DS | NRF24_STATUS_MAX_RT);
 
+    // Handle timeout error
     if (timeout == 0U) {
         nrf24_flush_tx();
         return NRF24_ERR_TIMEOUT;
     }
 
+    // Handle maximum retries reached (no ACK received)
     if (status & NRF24_STATUS_MAX_RT) {
         nrf24_flush_tx();
         return NRF24_ERR_MAX_RT;
@@ -312,16 +327,19 @@ nrf24_status_t nrf24_send_raw(const uint8_t *data, uint8_t length)
 
 void nrf24_flush_tx(void)
 {
+    // Flush TX FIFO
     nrf24_send_cmd(NRF24_CMD_FLUSH_TX);
 }
 
 void nrf24_flush_rx(void)
 {
+    // Flush RX FIFO
     nrf24_send_cmd(NRF24_CMD_FLUSH_RX);
 }
 
 void nrf24_print_details(void)
 {
+    // Read configuration registers for diagnostics
     uint8_t cfg    = nrf24_read_reg(NRF24_REG_CONFIG);
     uint8_t status = nrf24_read_reg(NRF24_REG_STATUS);
     uint8_t rf_ch  = nrf24_read_reg(NRF24_REG_RF_CH);
@@ -331,6 +349,7 @@ void nrf24_print_details(void)
     uint8_t tx_addr[NRF24_ADDR_WIDTH] = {0};
     nrf24_read_reg_buf(NRF24_REG_TX_ADDR, tx_addr, NRF24_ADDR_WIDTH);
 
+    // Print formatted parameters to UART console
     printf("\r\n--- NRF24L01+ Configuration ---\r\n");
     printf("CONFIG:     0x%02X\r\n", cfg);
     printf("STATUS:     0x%02X\r\n", status);

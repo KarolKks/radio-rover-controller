@@ -8,6 +8,11 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "spi.h"
+#include "stm32l4xx_ll_bus.h"
+#include "stm32l4xx_ll_gpio.h"
+#include "stm32l4xx_ll_utils.h"
+#include <stdio.h>
 
 /**
  * @brief Status codes returned by NRF24L01 functions.

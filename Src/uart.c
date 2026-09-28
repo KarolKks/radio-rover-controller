@@ -2,9 +2,10 @@
 
 uart_status_t uart_init(void)
 {
-    // Enable GPIOA clock and configure PA2 (TX)
+    // Enable GPIOA clock for USART2 transmitter pin (PA2)
     LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOA);
 
+    // Configure PA2 as Alternate Function AF7 (USART2 TX)
     LL_GPIO_InitTypeDef gpio_init;
     LL_GPIO_StructInit(&gpio_init);
     gpio_init.Pin        = LL_GPIO_PIN_2;
@@ -18,12 +19,14 @@ uart_status_t uart_init(void)
         return UART_ERR_INIT;
     }
 
-    // Enable USART2 clock
+    // Select USART2 clock source (PCLK1) and enable clock on APB1 bus
     LL_RCC_SetUSARTClockSource(LL_RCC_USART2_CLKSOURCE_PCLK1);
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_USART2);
 
+    // Disable USART2 before configuring parameters
     LL_USART_Disable(USART2);
 
+    // Configure baud rate, 8 data bits, no parity, 1 stop bit
     LL_USART_InitTypeDef usart_init;
     LL_USART_StructInit(&usart_init);
     usart_init.BaudRate          = UART_BAUDRATE;
@@ -33,9 +36,10 @@ uart_status_t uart_init(void)
         return UART_ERR_INIT;
     }
 
+    // Enable USART2 peripheral
     LL_USART_Enable(USART2);
 
-    // Wait until transmitter is ready
+    // Wait until transmitter acknowledge flag (TEACK) is set
     uint32_t timeout = 10000U;
     while (!LL_USART_IsActiveFlag_TEACK(USART2) && (--timeout > 0U)) {
     }
@@ -49,9 +53,11 @@ uart_status_t uart_init(void)
 
 void uart_send_char(char c)
 {
+    // Wait until transmit data register is empty (TXE flag)
     while (!LL_USART_IsActiveFlag_TXE(USART2)) {
     }
 
+    // Send single character to data register
     LL_USART_TransmitData8(USART2, (uint8_t)c);
 }
 
@@ -61,6 +67,7 @@ void uart_send_string(const char *str)
         return;
     }
 
+    // Transmit characters sequentially until null terminator '\0'
     while (*str != '\0') {
         uart_send_char(*str);
         str++;
@@ -69,6 +76,7 @@ void uart_send_string(const char *str)
 
 void uart_send_int(int32_t num)
 {
+    // Convert integer to string and transmit over UART
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%ld", (long)num);
     uart_send_string(buffer);
@@ -76,14 +84,17 @@ void uart_send_int(int32_t num)
 
 void uart_send_float(float num, uint8_t decimals)
 {
+    // Handle negative numbers
     if (num < 0.0f) {
         uart_send_char('-');
         num = -num;
     }
 
+    // Send integer portion
     uint32_t int_part = (uint32_t)num;
     uart_send_int((int32_t)int_part);
 
+    // Send fractional portion with specified decimal places
     if (decimals > 0) {
         uart_send_char('.');
         float frac = num - (float)int_part;
@@ -97,7 +108,7 @@ void uart_send_float(float num, uint8_t decimals)
     }
 }
 
-// Low-level hook allowing standard printf() to output to UART
+// Low-level libc hook redirecting standard printf() to UART
 int _write(int file, char *ptr, int len)
 {
     (void)file;

@@ -9,6 +9,10 @@ extern "C" {
 #include <stddef.h>
 #include <stdbool.h>
 
+#include "stm32l4xx_ll_bus.h"
+#include "stm32l4xx_ll_gpio.h"
+#include "stm32l4xx_ll_spi.h"
+
 /**
  * @brief Status codes returned by SPI functions.
  */

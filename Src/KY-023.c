@@ -3,17 +3,20 @@
 #define CONTROLLER_INVERT_X         (0)
 #define CONTROLLER_INVERT_Y         (0)
 
-// DMA buffer filled in background by ADC1 (Index 0: VRX PA0, Index 1: VRY PA1)
+// DMA buffer continuously filled in background by ADC1 (Index 0: VRX PA0, Index 1: VRY PA1)
 static volatile uint16_t s_adc_raw[2] = { 2048U, 2048U };
 static volatile bool s_button_event_flag = false;
 
+// Neutral resting center values determined during startup calibration
 static uint16_t s_center_x = 2048U;
 static uint16_t s_center_y = 2048U;
 
+// Helper function mapping raw ADC value (0-4095) to percentage (-100% to +100%) with deadzone
 static int8_t map_adc_to_percent(uint16_t adc_val, uint16_t center)
 {
     int32_t diff = (int32_t)adc_val - (int32_t)center;
 
+    // Suppress minor potentiometer noise within the deadzone
     if ((diff >= -(int32_t)CONTROLLER_DEADZONE_ADC) && (diff <= (int32_t)CONTROLLER_DEADZONE_ADC)) {
         return 0;
     }
@@ -46,6 +49,7 @@ void controller_calibrate_center(void)
     uint32_t sum_x = 0U;
     uint32_t sum_y = 0U;
 
+    // Collect 32 samples to calculate resting neutral center point
     for (uint32_t i = 0; i < 32U; ++i) {
         sum_x += s_adc_raw[0];
         sum_y += s_adc_raw[1];
@@ -60,16 +64,16 @@ void controller_calibrate_center(void)
 
 controller_status_t controller_init(void)
 {
-    // Configure ADC clock source to SYSCLK
+    // Select SYSCLK as ADC clock source
     LL_RCC_SetADCClockSource(LL_RCC_ADC_CLKSOURCE_SYSCLK);
 
-    // Enable clocks for GPIOA, SYSCFG, DMA1, and ADC
+    // Enable clock signals for GPIOA, SYSCFG, DMA1, and ADC
     LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOA);
     LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_ADC);
     LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG);
 
-    // Configure PA0 (VRX) and PA1 (VRY) as analog pins
+    // Configure analog inputs PA0 (VRX) and PA1 (VRY)
     LL_GPIO_InitTypeDef gpio_analog;
     LL_GPIO_StructInit(&gpio_analog);
     gpio_analog.Pin  = LL_GPIO_PIN_0 | LL_GPIO_PIN_1;
@@ -79,10 +83,10 @@ controller_status_t controller_init(void)
         return CONTROLLER_ERR_INIT;
     }
 
-    // Connect internal analog switch for PA0 and PA1 to ADC (required on STM32L4)
+    // Connect internal analog switch for PA0 and PA1 (required on STM32L4)
     LL_GPIO_EnablePinAnalogControl(GPIOA, LL_GPIO_PIN_0 | LL_GPIO_PIN_1);
 
-    // Configure PA4 (SW button) with internal pull-up
+    // Configure digital push-button input PA4 (SW) with internal pull-up
     LL_GPIO_InitTypeDef gpio_btn;
     LL_GPIO_StructInit(&gpio_btn);
     gpio_btn.Pin  = LL_GPIO_PIN_4;
@@ -92,15 +96,16 @@ controller_status_t controller_init(void)
         return CONTROLLER_ERR_INIT;
     }
 
-    // Route PA4 to EXTI Line 4 with falling edge trigger (press down)
+    // Route PA4 to EXTI Line 4 with falling edge trigger (active press down)
     LL_SYSCFG_SetEXTISource(LL_SYSCFG_EXTI_PORTA, LL_SYSCFG_EXTI_LINE4);
     LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_4);
     LL_EXTI_EnableFallingTrig_0_31(LL_EXTI_LINE_4);
 
+    // Enable interrupt in NVIC
     NVIC_SetPriority(EXTI4_IRQn, 6);
     NVIC_EnableIRQ(EXTI4_IRQn);
 
-    // Configure DMA1 Channel 1 for ADC1 circular transfer
+    // Configure DMA1 Channel 1 in circular mode to transfer ADC samples automatically to RAM
     LL_DMA_ConfigTransfer(DMA1, LL_DMA_CHANNEL_1,
                           LL_DMA_DIRECTION_PERIPH_TO_MEMORY |
                           LL_DMA_MODE_CIRCULAR |
@@ -120,19 +125,19 @@ controller_status_t controller_init(void)
     LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_1, 2);
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_1);
 
-    // Select ADC common clock (synchronous PCLK divided by 1)
+    // Set synchronous ADC clock (PCLK / 1)
     LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(ADC1), LL_ADC_CLOCK_SYNC_PCLK_DIV1);
 
-    // Exit ADC deep power down mode and enable voltage regulator
+    // Wake up ADC from deep power-down and enable internal voltage regulator
     LL_ADC_DisableDeepPowerDown(ADC1);
     LL_ADC_EnableInternalRegulator(ADC1);
 
-    // Wait for regulator stabilization delay (~20us)
+    // Wait for internal voltage regulator to stabilize (~20 us)
     for (volatile uint32_t i = 0; i < 3000U; ++i) {
         __NOP();
     }
 
-    // Run ADC calibration
+    // Perform ADC automatic self-calibration
     LL_ADC_StartCalibration(ADC1, LL_ADC_SINGLE_ENDED);
     uint32_t timeout = 50000U;
     while (LL_ADC_IsCalibrationOnGoing(ADC1) && (--timeout > 0U)) {
@@ -141,7 +146,7 @@ controller_status_t controller_init(void)
         return CONTROLLER_ERR_TIMEOUT;
     }
 
-    // Configure scan sequence: Rank 1 -> Channel 5 (PA0), Rank 2 -> Channel 6 (PA1)
+    // Configure regular conversion sequence: Rank 1 -> CH5 (PA0), Rank 2 -> CH6 (PA1)
     LL_ADC_REG_SetSequencerLength(ADC1, LL_ADC_REG_SEQ_SCAN_ENABLE_2RANKS);
     LL_ADC_REG_SetSequencerRanks(ADC1, LL_ADC_REG_RANK_1, LL_ADC_CHANNEL_5);
     LL_ADC_REG_SetSequencerRanks(ADC1, LL_ADC_REG_RANK_2, LL_ADC_CHANNEL_6);
@@ -149,7 +154,7 @@ controller_status_t controller_init(void)
     LL_ADC_SetChannelSamplingTime(ADC1, LL_ADC_CHANNEL_5, LL_ADC_SAMPLINGTIME_47CYCLES_5);
     LL_ADC_SetChannelSamplingTime(ADC1, LL_ADC_CHANNEL_6, LL_ADC_SAMPLINGTIME_47CYCLES_5);
 
-    // Configure continuous conversion, overwrite on overrun, and circular DMA
+    // Enable continuous conversion mode, overrun overwrite, and circular DMA
     LL_ADC_REG_SetContinuousMode(ADC1, LL_ADC_REG_CONV_CONTINUOUS);
     LL_ADC_REG_SetOverrun(ADC1, LL_ADC_REG_OVR_DATA_OVERWRITTEN);
     LL_ADC_REG_SetDMATransfer(ADC1, LL_ADC_REG_DMA_TRANSFER_UNLIMITED);
@@ -167,7 +172,7 @@ controller_status_t controller_init(void)
     // Start background conversions
     LL_ADC_REG_StartConversion(ADC1);
 
-    // Auto-calibrate center resting position at startup
+    // Auto-calibrate neutral center resting position at startup
     controller_calibrate_center();
 
     return CONTROLLER_OK;
@@ -179,7 +184,7 @@ void controller_get_data(controller_data_t *data)
         return;
     }
 
-    // Read current values directly from background DMA buffer
+    // Fetch latest raw values directly from background DMA buffer
     data->raw_x = s_adc_raw[0];
     data->raw_y = s_adc_raw[1];
 
@@ -201,12 +206,13 @@ void controller_get_data(controller_data_t *data)
 
 bool controller_is_button_down(void)
 {
-    // Pin PA4 is pulled up; active state is LOW
+    // PA4 is pulled up to 3.3V; active (pressed) state is LOW (0)
     return (LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_4) == 0U);
 }
 
 bool controller_get_button_event(void)
 {
+    // Atomically check and clear button press event flag
     if (s_button_event_flag) {
         s_button_event_flag = false;
         return true;
@@ -214,7 +220,7 @@ bool controller_get_button_event(void)
     return false;
 }
 
-// Hardware interrupt vector for button SW on PA4
+// Hardware interrupt handler for button EXTI Line 4 (PA4)
 void EXTI4_IRQHandler(void)
 {
     if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_4)) {
